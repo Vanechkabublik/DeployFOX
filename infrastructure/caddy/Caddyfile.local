@@ -1,0 +1,7 @@
+{
+    auto_https off
+}
+:80 {
+    respond "DeployFox local edge. Use agent healthchecks or mapped test domains."
+}
+import /routes/*.caddy

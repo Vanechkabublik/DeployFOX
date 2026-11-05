@@ -1,0 +1,14 @@
+{
+    email {$ACME_EMAIL}
+    admin localhost:2019
+}
+
+{$PANEL_DOMAIN} {
+    encode zstd gzip
+    header Strict-Transport-Security "max-age=31536000"
+    reverse_proxy frontend:3000 {
+        flush_interval -1
+    }
+}
+
+import /routes/*.caddy

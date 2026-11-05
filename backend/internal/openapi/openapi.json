@@ -1,0 +1,1059 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "DeployFox API",
+    "version": "0.1.0",
+    "description": "Single-owner control plane. Mutations require Origin matching PUBLIC_URL and X-CSRF-Token returned by /auth/me. GitHub webhooks use HMAC, setup requires X-Setup-Token."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "session": []
+    }
+  ],
+  "paths": {
+    "/setup/status": {
+      "get": {
+        "security": [],
+        "summary": "Initialization status",
+        "responses": {
+          "200": {
+            "description": "initialized and provider"
+          }
+        }
+      }
+    },
+    "/setup": {
+      "post": {
+        "security": [],
+        "summary": "Create the sole administrator. Returns 404 after initialization",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Setup-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Credentials"
+        },
+        "responses": {
+          "200": {
+            "description": "Session cookie and CSRF token"
+          },
+          "403": {
+            "description": "Invalid initialization token"
+          },
+          "404": {
+            "description": "Setup disabled"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "security": [],
+        "summary": "Password and optional TOTP/recovery-code login",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Credentials"
+        },
+        "responses": {
+          "200": {
+            "description": "Session cookie and CSRF"
+          },
+          "401": {
+            "description": "Invalid credentials or second factor"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "summary": "Session identity, csrf, provider and totp_enabled",
+        "responses": {
+          "200": {
+            "description": "Session identity"
+          },
+          "401": {
+            "description": "No valid session"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "Revoke current session",
+        "responses": {
+          "200": {
+            "description": "Revoked"
+          }
+        }
+      }
+    },
+    "/auth/password": {
+      "post": {
+        "summary": "Change password and revoke all sessions",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "current",
+                  "password"
+                ],
+                "properties": {
+                  "current": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed"
+          }
+        }
+      }
+    },
+    "/auth/totp/start": {
+      "post": {
+        "summary": "Begin TOTP enrollment; requires current password",
+        "responses": {
+          "200": {
+            "description": "Secret and otpauth URI shown only during enrollment"
+          }
+        }
+      }
+    },
+    "/auth/totp/enable": {
+      "post": {
+        "summary": "Confirm enrollment using code and obtain eight single-use recovery codes",
+        "responses": {
+          "200": {
+            "description": "Enabled; recovery codes shown once"
+          }
+        }
+      }
+    },
+    "/auth/totp/disable": {
+      "post": {
+        "summary": "Disable with password and TOTP/recovery code",
+        "responses": {
+          "200": {
+            "description": "Disabled"
+          }
+        }
+      }
+    },
+    "/auth/sessions": {
+      "get": {
+        "summary": "List active sessions",
+        "responses": {
+          "200": {
+            "description": "Session identifiers, timestamps, current flag"
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "summary": "List up to 200 projects",
+        "responses": {
+          "200": {
+            "description": "Projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create project",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Project"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "409": {
+            "description": "Name or domain conflict"
+          }
+        }
+      }
+    },
+    "/projects/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "get": {
+        "summary": "Project details",
+        "responses": {
+          "200": {
+            "description": "Project"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete route and project containers, retain volumes/images",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Confirm-Delete",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact project name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Active deployment or worker busy"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update project settings; deploy to apply. Previous domain remains reserved until successful switching.",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/deploy": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "post": {
+        "summary": "Queue deployment",
+        "responses": {
+          "202": {
+            "description": "Deployment id"
+          },
+          "409": {
+            "description": "An active deployment already exists"
+          }
+        }
+      }
+    },
+    "/projects/{id}/rollback": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "post": {
+        "summary": "Queue previous successful image with current environment",
+        "responses": {
+          "202": {
+            "description": "Queued"
+          },
+          "409": {
+            "description": "No previous image or deployment active"
+          }
+        }
+      }
+    },
+    "/projects/{id}/actions/{action}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        },
+        {
+          "in": "path",
+          "name": "action",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "restart"
+            ]
+          }
+        }
+      ],
+      "post": {
+        "summary": "Control active container",
+        "responses": {
+          "200": {
+            "description": "Completed"
+          }
+        }
+      }
+    },
+    "/projects/{id}/environment": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "get": {
+        "summary": "List variable names only",
+        "responses": {
+          "200": {
+            "description": "Array of keys"
+          }
+        }
+      },
+      "put": {
+        "summary": "Atomically upsert encrypted values and delete selected keys",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "values": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "delete": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved; redeploy to apply"
+          }
+        }
+      }
+    },
+    "/projects/{id}/logs": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "get": {
+        "summary": "SSE bounded application log snapshots, every three seconds",
+        "responses": {
+          "200": {
+            "description": "SSE",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}/metrics": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "get": {
+        "summary": "Docker CPU, memory and process state",
+        "responses": {
+          "200": {
+            "description": "Metrics or available:false for mock"
+          }
+        }
+      }
+    },
+    "/deployments": {
+      "get": {
+        "summary": "Latest 100 deployments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deployment history"
+          }
+        }
+      }
+    },
+    "/deployments/{id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "post": {
+        "summary": "Request cancellation at the next safe build boundary",
+        "responses": {
+          "202": {
+            "description": "Requested"
+          },
+          "409": {
+            "description": "Already switching traffic or finished"
+          }
+        }
+      }
+    },
+    "/deployments/{id}/logs": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "get": {
+        "summary": "SSE logs with Last-Event-ID cursor, ten-minute reconnect lifetime",
+        "responses": {
+          "200": {
+            "description": "SSE",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/databases": {
+      "get": {
+        "summary": "List databases without secrets",
+        "responses": {
+          "200": {
+            "description": "Databases"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create persistent database container",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "engine",
+                  "version"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "engine": {
+                    "type": "string",
+                    "enum": [
+                      "postgres",
+                      "redis",
+                      "mysql"
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Container started; verify readiness"
+          }
+        }
+      }
+    },
+    "/databases/{id}/{action}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        },
+        {
+          "in": "path",
+          "name": "action",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop",
+              "restart",
+              "backup",
+              "connection",
+              "restore"
+            ]
+          }
+        }
+      ],
+      "post": {
+        "summary": "Database control or explicit audited credential reveal",
+        "responses": {
+          "200": {
+            "description": "Result"
+          }
+        },
+        "description": "Restore requires a JSON body with backup filename and confirmation equal to the exact database name. It replaces data. Redis panel restore is not supported.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "backup": {
+                    "type": "string"
+                  },
+                  "confirmation": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/github/repositories": {
+      "get": {
+        "summary": "Up to 100 installation repositories",
+        "responses": {
+          "200": {
+            "description": "GitHub installation repositories"
+          },
+          "503": {
+            "description": "App not configured"
+          }
+        }
+      }
+    },
+    "/github/webhook": {
+      "post": {
+        "security": [],
+        "summary": "Signed idempotent GitHub push webhook",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Hub-Signature-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Delivery",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-GitHub-Event",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ignored or duplicate"
+          },
+          "202": {
+            "description": "Accepted"
+          },
+          "401": {
+            "description": "Invalid signature"
+          }
+        }
+      }
+    },
+    "/system": {
+      "get": {
+        "summary": "Control-plane project/deployment counts",
+        "responses": {
+          "200": {
+            "description": "Counts and provider"
+          }
+        }
+      }
+    },
+    "/monitoring/host": {
+      "get": {
+        "summary": "Host CPU/memory and Docker disk metrics, no telemetry export",
+        "responses": {
+          "200": {
+            "description": "Metrics or available:false"
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "summary": "Latest 100 audit events",
+        "responses": {
+          "200": {
+            "description": "Events"
+          }
+        }
+      }
+    },
+    "/projects/{id}/domain-check": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ID"
+        }
+      ],
+      "get": {
+        "summary": "Check DNS against SERVER_IP, public TCP ports and verified TLS certificate",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/auth/sessions/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      ],
+      "delete": {
+        "summary": "Revoke an active session",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/setup/checks": {
+      "get": {
+        "summary": "Authenticated setup wizard state and first-project count",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/setup/complete": {
+      "post": {
+        "summary": "Complete the setup wizard after creating the first project",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/github/connection": {
+      "get": {
+        "summary": "Verified active/pending GitHub installation and App configuration status",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/github/connect": {
+      "post": {
+        "summary": "Start GitHub App installation with a one-time ten-minute state",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/github/confirm": {
+      "post": {
+        "summary": "Confirm the verified GitHub account as the local administrator",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/github/callback": {
+      "get": {
+        "security": [],
+        "summary": "Verify App installation and save pending connection; never activates credentials without authenticated admin confirmation",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Redirect to panel for administrator confirmation"
+          },
+          "403": {
+            "description": "Invalid/expired/replayed state"
+          }
+        }
+      }
+    },
+    "/github/branches": {
+      "get": {
+        "summary": "List the first 100 branches accessible to the GitHub App",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repository",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "owner/repository"
+            }
+          }
+        ]
+      }
+    },
+    "/monitoring/caddy": {
+      "get": {
+        "summary": "Validate Caddy configuration through the private host agent",
+        "responses": {
+          "200": {
+            "description": "Validation result or available:false in mock mode"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "deployfox_session"
+      }
+    },
+    "parameters": {
+      "ID": {
+        "in": "path",
+        "name": "id",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "requestBodies": {
+      "Credentials": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "email",
+                "password"
+              ],
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "format": "email"
+                },
+                "password": {
+                  "type": "string",
+                  "format": "password"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "TOTP or recovery code; login only"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Project": {
+        "type": "object",
+        "required": [
+          "name",
+          "source_type",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 64
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "git"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string",
+            "default": "main"
+          },
+          "build_method": {
+            "type": "string",
+            "enum": [
+              "dockerfile",
+              "buildpack"
+            ],
+            "default": "dockerfile"
+          },
+          "dockerfile": {
+            "type": "string",
+            "default": "Dockerfile"
+          },
+          "build_context": {
+            "type": "string",
+            "default": "."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 3000
+          },
+          "domain": {
+            "type": "string",
+            "default": ""
+          },
+          "health_path": {
+            "type": "string",
+            "default": "/"
+          },
+          "auto_deploy": {
+            "type": "boolean",
+            "default": false
+          },
+          "memory_mb": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 32768,
+            "default": 512
+          },
+          "cpu": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 32,
+            "default": 1
+          },
+          "service_type": {
+            "type": "string",
+            "enum": [
+              "http",
+              "worker"
+            ],
+            "default": "http",
+            "description": "HTTP readiness or five-second process startup check"
+          }
+        }
+      },
+      "ProjectUpdate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 64
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "git"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string",
+            "default": "main"
+          },
+          "build_method": {
+            "type": "string",
+            "enum": [
+              "dockerfile",
+              "buildpack"
+            ],
+            "default": "dockerfile"
+          },
+          "dockerfile": {
+            "type": "string",
+            "default": "Dockerfile"
+          },
+          "build_context": {
+            "type": "string",
+            "default": "."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 3000
+          },
+          "domain": {
+            "type": "string",
+            "default": ""
+          },
+          "health_path": {
+            "type": "string",
+            "default": "/"
+          },
+          "auto_deploy": {
+            "type": "boolean",
+            "default": false
+          },
+          "memory_mb": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 32768,
+            "default": 512
+          },
+          "cpu": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 32,
+            "default": 1
+          },
+          "service_type": {
+            "type": "string",
+            "enum": [
+              "http",
+              "worker"
+            ],
+            "default": "http",
+            "description": "HTTP readiness or five-second process startup check"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,177 @@
+name: deployfox
+x-env: &env
+  APP_ENV: production
+  DEPLOYMENT_PROVIDER: docker
+  DATABASE_URL: postgres://deployfox:${POSTGRES_PASSWORD:?Run install.sh}@postgres:5432/deployfox?sslmode=disable
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Run install.sh}@redis:6379/0
+  PUBLIC_URL: ${PUBLIC_URL:?Set PUBLIC_URL}
+  SERVER_IP: ${SERVER_IP:-}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
+  SETUP_TOKEN: ${SETUP_TOKEN:?Set SETUP_TOKEN}
+  AGENT_URL: http://agent:8090
+  AGENT_TOKEN: ${AGENT_TOKEN:?Set AGENT_TOKEN}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+  GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+  GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_key
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: deployfox
+      POSTGRES_DB: deployfox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [control]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U deployfox -d deployfox]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    logging: *logging
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: [sh, -c, 'exec redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis_data:/data]
+    networks: [control]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    logging: *logging
+  api:
+    stop_grace_period: 40s
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    build:
+      context: ./backend
+      target: runtime
+    environment: *env
+    secrets: [github_key]
+    networks: [control, agent_control, outbound]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    logging: *logging
+  worker:
+    stop_grace_period: 40s
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    build:
+      context: ./backend
+      target: runtime
+    command: [worker]
+    environment: *env
+    secrets: [github_key]
+    networks: [control, agent_control, outbound]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, kill -0 1]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+  frontend:
+    build: ./frontend
+    environment:
+      API_INTERNAL_URL: http://api:8080
+    networks: [control, edge]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:3000/]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    logging: *logging
+  agent:
+    stop_grace_period: 40s
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 512
+    mem_limit: 512m
+    build:
+      context: ./backend
+      target: agent
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN:?Set AGENT_TOKEN}
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?Set PANEL_DOMAIN}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_key
+    secrets: [github_key]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker:/host/docker:ro
+      - caddy_routes:/routes
+      - agent_work:/work
+      - agent_docker_config:/root/.docker
+      - ./backups/managed:/backups
+    networks: [agent_control, apps]
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null --header="Authorization: Bearer $$AGENT_TOKEN" http://127.0.0.1:8090/health']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+  caddy:
+    image: caddy:2-alpine
+    container_name: deployfox-caddy
+    environment:
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?Set PANEL_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_routes:/routes:ro
+    networks: [edge, apps]
+    depends_on:
+      frontend: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:2019/config/]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+networks:
+  outbound: {}
+  control: {internal: true}
+  agent_control: {internal: true}
+  edge: {}
+  apps:
+    name: deployfox-apps
+volumes:
+  agent_docker_config: {}
+  postgres_data: {}
+  redis_data: {}
+  caddy_data: {}
+  caddy_config: {}
+  caddy_routes: {}
+  agent_work: {}
+secrets:
+  github_key:
+    file: ${GITHUB_PRIVATE_KEY_FILE:-./secrets/github-app.pem}

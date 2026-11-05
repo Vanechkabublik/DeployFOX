@@ -1,0 +1,13 @@
+# Test-only isolated data and a separate loopback port. Reuses locally built images.
+services:
+  api:
+    image: deployfox-local-api
+    environment:
+      PUBLIC_URL: http://localhost:3001
+  worker:
+    image: deployfox-local-worker
+    environment:
+      PUBLIC_URL: http://localhost:3001
+  frontend:
+    image: deployfox-local-frontend
+    ports: !override ["127.0.0.1:3001:3000"]

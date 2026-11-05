@@ -1,0 +1,48 @@
+# Explicit opt-in for trusted Docker Desktop/Linux testing. Never add this to mock development by accident.
+services:
+  api:
+    environment:
+      DEPLOYMENT_PROVIDER: docker
+      AGENT_URL: http://agent:8090
+      AGENT_TOKEN: ${AGENT_TOKEN:?Generate a random 64-character token in .env}
+  worker:
+    environment:
+      DEPLOYMENT_PROVIDER: docker
+      AGENT_URL: http://agent:8090
+      AGENT_TOKEN: ${AGENT_TOKEN:?Generate AGENT_TOKEN}
+  agent:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 40s
+    pids_limit: 512
+    mem_limit: 512m
+    build:
+      context: ./backend
+      target: agent
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN:?Generate AGENT_TOKEN}
+      CADDY_HTTP_ONLY: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker:/host/docker:ro
+      - agent_work:/work
+      - agent_docker_config:/root/.docker
+      - local_routes:/routes
+      - ./backups/managed:/backups
+    networks: [control, apps]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    container_name: deployfox-caddy
+    ports: ["127.0.0.1:8088:80"]
+    volumes:
+      - ./infrastructure/caddy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - local_routes:/routes:ro
+    networks: [apps]
+networks:
+  apps:
+    name: deployfox-apps
+volumes:
+  agent_docker_config: {}
+  agent_work: {}
+  local_routes: {}
